@@ -1,0 +1,15 @@
+{
+    "version"        : "0.2.0",
+    "configurations" : [
+        {
+            "name"            : "Debug Rust project",
+            "type"            : "lldb",
+            "request"         : "launch",
+            "program"         : "${workspaceFolder}/target/debug/${workspaceFolderBasename}",
+            "args"            : [ "-m", "/workspaces/${workspaceFolderBasename}/test/manifest.json", "-d", "/workspaces/${workspaceFolderBasename}/test/SomeProject" ],
+            "cwd"             : "${workspaceFolder}",
+            "preLaunchTask"   : "cargo build",
+            "sourceLanguages" : ["rust"]
+        }
+    ]
+}

@@ -1,0 +1,9 @@
+{
+    "files": {
+        "LibUsbDotNet.LibUsbDotNet.dll": "00e921c2f55bd7cccc863588644534cb89534f013c233d759a7d805c806264ee",
+        "Newtonsoft.Json.dll": "22c649f75fce5be7c7ccda8880473b634ef69ecf33f5d1ab8ad892caf47d5a07",
+        "System.Formats.Asn1.dll": "a327f58e27a73512c21be58fe47d3b1c3320be5c73fb7418a3ab566d6dadb6fc",
+        "System.Security.Cryptography.Pkcs.dll": "85111394fbe5d3ad9c5c5d0c1fd7c223acf17acd7812d4ba2bb5e7c7f0f2e858",
+        "runtimes/win/lib/net6.0/System.Security.Cryptography.Pkcs.dll": "8da4f605a4882e12d13dfd8b55a71607cb5216423eba7a4d3a3b9b8f42e754b0"
+    }
+}
