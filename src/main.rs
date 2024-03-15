@@ -1,20 +1,22 @@
-use clap::{App, Arg};
-use serde::Deserialize;
-use serde_json::from_reader;
+mod cli;
+
+use serde::{Deserialize, Serialize};
+use serde_json::{from_reader, to_writer_pretty};
 use sha2::{Digest, Sha256};
-use std::process;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
+use std::process;
+use walkdir::WalkDir;
 
-/// Represents the expected structure of the manifest file.
-#[derive(Debug, Deserialize)]
+/// Represents the structure of the manifest file, which maps file paths to their SHA256 hashes.
+#[derive(Debug, Deserialize, Serialize)]
 struct Manifest {
     files: HashMap<String, String>,
 }
 
-/// The entry point for the verification program.
+/// Main entry point of the program.
 fn main() {
     match run() {
         Ok(_) => println!("Verification successful."),
@@ -25,54 +27,41 @@ fn main() {
     }
 }
 
-/// Performs the main steps of the program: parsing arguments, reading the manifest, and verifying the directory.
-fn run() -> Result<(), bool> {
-    // Parse command line arguments to get paths for the manifest and the directory.
-    let (manifest_path, directory_path) = parse_arguments();
+/// Performs the program's operations based on the user's input.
+/// 
+/// Returns:
+/// - Ok(()) if the operation (verify or generate) completes successfully.
+/// - Err(String) with an error message if an error occurs.
+fn run() -> Result<(), String> {
 
-    // Read and parse the manifest file.
-    let manifest = read_manifest(&manifest_path).map_err(|_| true)?;
+    // Parse command-line arguments.
+    let matches = cli::parse_arguments();
 
-    // Verify the directory against the manifest.
-    verify_directory(&directory_path, &manifest).map_err(|_| true)?;
-
-    // If verification is successful, print a success message.
-    println!("Success: All files in the directory match the manifest entries!");
+    // Determine the subcommand and execute the corresponding operation.
+    match matches.subcommand() {
+        Some(("verify", sub_m)) => {
+            // Extract paths from arguments for the verification operation.
+            let manifest_path: PathBuf = sub_m.value_of("manifest").unwrap().into();
+            let directory_path: PathBuf = sub_m.value_of("directory").unwrap().into();
+            // Perform verification and handle potential errors.
+            verify_operation(&manifest_path, &directory_path)
+                .map_err(|_| "Verification failed due to an unexpected error.".to_string())?;
+            println!("Verification successful.");
+        }
+        Some(("generate", sub_m)) => {
+            // Extract paths from arguments for the manifest generation operation.
+            let directory_path: PathBuf = sub_m.value_of("directory").unwrap().into();
+            let output_path: PathBuf = sub_m.value_of("output").unwrap().into();
+            // Perform manifest generation and handle potential errors.
+            generate_operation(&directory_path, &output_path)
+                .map_err(|e| format!("Manifest generation failed: {}", e.to_string()))?;
+            println!("Manifest generated successfully.");
+        }
+        // Handle case where no valid subcommand is provided.
+        _ => return Err("No valid subcommand provided. Use 'verify' or 'generate'.".to_string()),
+    }
 
     Ok(())
-}
-
-/// Parses command-line arguments, extracting paths for the manifest and the target directory.
-///
-/// Returns:
-/// - `(PathBuf, PathBuf)`: Tuple containing the manifest path and the directory path.
-fn parse_arguments() -> (PathBuf, PathBuf)
-{
-    let matches = App::new("Manifest Checker")
-        .version("0.1.0")
-        .author("Usman Mehmood (usmanmehmood55@gmail.com)")
-        .about("Verifies files in a directory against a checksum manifest")
-        .arg(Arg::with_name("manifest")
-            .short('m')
-            .long("manifest")
-            .value_name("FILE")
-            .help("Sets the path to the manifest file")
-            .takes_value(true)
-            .required(true))
-        .arg(Arg::with_name("directory")
-            .short('d')
-            .long("directory")
-            .value_name("DIR")
-            .help("Sets the input directory path")
-            .takes_value(true)
-            .required(true))
-        .get_matches();
-
-    // Extract and return the manifest and directory paths from the arguments.
-    let manifest_path: PathBuf  = matches.value_of("manifest").unwrap().into();
-    let directory_path: PathBuf = matches.value_of("directory").unwrap().into();
-
-    (manifest_path, directory_path)
 }
 
 /// Reads the specified manifest file and parses it into a `Manifest` struct.
@@ -84,11 +73,52 @@ fn parse_arguments() -> (PathBuf, PathBuf)
 /// - `Result<Manifest, std::io::Error>`: The parsed manifest or an error if reading or parsing failed.
 fn read_manifest(manifest_path: &PathBuf) -> Result<Manifest, std::io::Error>
 {
-    let manifest_file: File     = File::open(manifest_path)?;
+    // Attempt to open and read the manifest file.
+    let manifest_file: File = File::open(manifest_path)?;
     let reader: BufReader<File> = BufReader::new(manifest_file);
-    let manifest: Manifest      = from_reader(reader).expect("Error parsing JSON");
-
+    // Deserialize the JSON content into a Manifest struct.
+    let manifest: Manifest = from_reader(reader)?;
     Ok(manifest)
+}
+
+/// Performs the verification operation by checking if files in the directory match the manifest.
+/// 
+/// Args:
+/// - `manifest_path`: Path to the manifest file.
+/// - `directory_path`: Path to the directory to be verified.
+/// 
+/// Returns:
+/// - Ok(()) if verification is successful, Err(bool) if not.
+fn verify_operation(manifest_path: &PathBuf, directory_path: &PathBuf) -> Result<(), bool> {
+    let manifest: Manifest = read_manifest(manifest_path).map_err(|_| true)?;
+    verify_directory(directory_path, &manifest)
+}
+
+/// Generates a manifest file based on the files found in the specified directory.
+/// 
+/// Args:
+/// - `directory_path`: Path to the directory from which to generate the manifest.
+/// - `output_path`: Path where the generated manifest file should be saved.
+/// 
+/// Returns:
+/// - Ok(()) if generation is successful, Err(io::Error) if an error occurs during file operations.
+fn generate_operation(directory_path: &PathBuf, output_path: &PathBuf) -> Result<(), std::io::Error> {
+    let mut manifest: Manifest = Manifest { files: HashMap::new() };
+
+    for entry in WalkDir::new(directory_path)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|e| e.file_type().is_file()) {
+            let path = entry.path();
+            if let Some(relative_path) = path.strip_prefix(directory_path).ok().and_then(|p| p.to_str()) {
+                let hash = hash_file(path)?;
+                manifest.files.insert(relative_path.replace("\\", "/"), hash);
+            }
+    }
+
+    let manifest_file = File::create(output_path)?;
+    to_writer_pretty(&manifest_file, &manifest)?;
+    Ok(())
 }
 
 /// Verifies each file listed in the manifest exists in the directory and matches the recorded hash.
